@@ -4,7 +4,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt
 
 COPY ./scripts/docker_*.sh /root/
-COPY ./target/debug/nimiq-client /bin/
+COPY ./target/release/nimiq-client /bin/
 WORKDIR /root
 
 ENV NIMIQ_NETWORK=dev-albatross \
