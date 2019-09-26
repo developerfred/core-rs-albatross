@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::time::Duration;
 
 
@@ -17,14 +18,20 @@ pub struct Config {
 
 }
 
+fn parse_var<T: FromStr>(key: &str) -> Option<T> {
+    std::env::var(key).ok()
+        .and_then(|v| v.parse::<T>().ok())
+}
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            update_count: 1,
-            update_interval: Duration::from_millis(100),
-            timeout: Duration::from_millis(500),
-            peer_count: 10,
+            update_count: parse_var("HANDEL_UPDATE_COUNT").unwrap_or(1),
+            update_interval: Duration::from_millis(
+                parse_var("HANDEL_UPDATE_INTERVAL").unwrap_or(100)),
+            timeout: Duration::from_millis(
+                parse_var("HANDEL_TIMEOUT").unwrap_or(500)),
+            peer_count: parse_var("HANDEL_PEER_COUNT").unwrap_or(10),
         }
     }
 }
