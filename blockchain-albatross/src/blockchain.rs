@@ -825,6 +825,9 @@ impl Blockchain {
 
     fn commit_accounts(&self, state: &BlockchainState, txn: &mut WriteTransaction, block: &Block) -> Result<(), PushError> {
         let accounts = &state.accounts;
+
+        let staking_contract_before = accounts.get(&Address::from_user_friendly_address("NQ30 EDDQ 9C99 S6P5 KFEH SSUQ 968M RN5V 7MGA").unwrap(), Some(&txn));
+
         match block {
             Block::Macro(ref macro_block) => {
                 let mut inherents = self.finalize_last_epoch(state, &macro_block.header);
@@ -859,9 +862,12 @@ impl Blockchain {
 
         // Verify accounts hash.
         let accounts_hash = accounts.hash(Some(&txn));
-        trace!("Block state root: {}", block.state_root());
-        trace!("Accounts hash:    {}", accounts_hash);
+        let staking_contract_after= accounts.get(&Address::from_user_friendly_address("NQ30 EDDQ 9C99 S6P5 KFEH SSUQ 968M RN5V 7MGA").unwrap(), Some(&txn));
         if block.state_root() != &accounts_hash {
+            debug!("Block state root: {}", block.state_root());
+            debug!("Accounts hash:    {}", accounts_hash);
+            debug!("Staking Contact before: {:#?}", staking_contract_before);
+            debug!("Staking Contact after: {:#?}", staking_contract_after);
             return Err(PushError::InvalidBlock(BlockError::AccountsHashMismatch));
         }
 
