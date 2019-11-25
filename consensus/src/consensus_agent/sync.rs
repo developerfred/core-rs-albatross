@@ -2,7 +2,7 @@ use std::collections::vec_deque::VecDeque;
 use std::default::Default;
 use std::mem;
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 
@@ -70,7 +70,10 @@ impl<B: AbstractBlockchain> SyncProtocol<B> for FullSync<B> {
 
     fn on_block(&self, block: B::Block) {
         let hash = block.hash();
+        let start = Instant::now();
+        let num_txs = block.transactions().map_or(0, |txs| txs.len());
         let result = self.blockchain.push(block);
+        debug!("blockchain.push() took {}ms ({} txs)", start.elapsed().as_millis(), num_txs);
         self.notifier.read().notify(SyncEvent::BlockProcessed(hash, result));
     }
 

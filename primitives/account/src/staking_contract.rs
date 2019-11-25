@@ -457,7 +457,7 @@ impl StakingContract {
         let mut potential_validators = Vec::with_capacity(self.active_stake_sorted.len());
         let mut weights: Vec<u64> = Vec::with_capacity(self.active_stake_sorted.len());
 
-        debug!("Select validators: num_slots = {}", policy::SLOTS);
+        trace!("Select validators: num_slots = {}", policy::SLOTS);
 
         // NOTE: `active_stake_sorted` is sorted from highest to lowest stake. `LookupTable`
         // expects the reverse ordering.

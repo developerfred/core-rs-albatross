@@ -117,13 +117,13 @@ impl<P: ConsensusProtocol + 'static> InventoryManager<P> {
         let record = record_opt.unwrap();
         let current_opt = record.0.upgrade();
         let agent_opt = agent_weak.upgrade();
-        if let Some(current) = current_opt {
+        if let Some(ref current) = current_opt {
             if agent_opt.is_none() {
                 return;
             }
 
             let agent = agent_opt.unwrap();
-            if !Arc::ptr_eq(&agent, &current) {
+            if !Arc::ptr_eq(&agent, current) {
                 record.1.remove(&agent);
                 return;
             }
@@ -138,6 +138,8 @@ impl<P: ConsensusProtocol + 'static> InventoryManager<P> {
         let next_agent = next_agent_opt.unwrap().clone();
         record.1.remove(&next_agent);
         record.0 = Arc::downgrade(&next_agent);
+
+        debug!("Active agent {:p} didn't find {:?} {}, trying {:p} ({} agents left)", current_opt.unwrap(), vector.ty, vector.hash, next_agent, record.1.len());
 
         self.request_vector(&next_agent, vector);
     }
@@ -619,7 +621,7 @@ impl<P: ConsensusProtocol + 'static> InventoryAgent<P> {
     }
 
     fn on_not_found(&self, vectors: Vec<InvVector>) {
-        trace!("[NOTFOUND] {} vectors", vectors.len());
+        debug!("[NOTFOUND] {} vectors", vectors.len());
 
         // Only consider vectors that we requested.
         let state = self.state.read();

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use rand::seq::SliceRandom;
@@ -64,6 +64,7 @@ struct ConsensusState<P: ConsensusProtocol + 'static> {
     agents: ConsensusAgentMap<P>,
 
     sync_peer: Option<Arc<Peer>>,
+    epoch_start: Instant,
 }
 
 impl<P: ConsensusProtocol> Consensus<P> {
@@ -92,6 +93,7 @@ impl<P: ConsensusProtocol> Consensus<P> {
                 agents: HashMap::new(),
 
                 sync_peer: None,
+                epoch_start: Instant::now(),
             }),
 
             self_weak: MutableOnce::new(Weak::new()),
@@ -203,16 +205,24 @@ impl<P: ConsensusProtocol> Consensus<P> {
     }
 
     fn on_blockchain_event(&self, event: &BlockchainEvent<<P::Blockchain as AbstractBlockchain>::Block>) {
-        let state = self.state.read();
+        let mut state = self.state.write();
 
         let blocks: Vec<&<P::Blockchain as AbstractBlockchain>::Block>;
         let block;
         match event {
-            BlockchainEvent::Extended(_) | BlockchainEvent::Finalized(_) => {
+            BlockchainEvent::Extended(_) => {
                 // This implicitly takes the lock on the blockchain state.
                 block = self.blockchain.head_block();
                 blocks = vec![&block];
             },
+            BlockchainEvent::Finalized(_) => {
+                // This implicitly takes the lock on the blockchain state.
+                block = self.blockchain.head_block();
+                blocks = vec![&block];
+
+                info!("Epoch took {}ms", state.epoch_start.elapsed().as_millis());
+                state.epoch_start = Instant::now();
+            }
             BlockchainEvent::Rebranched(_, ref adopted_blocks) => {
                 blocks = adopted_blocks.iter().map(|(_, block)| block).collect();
             },
