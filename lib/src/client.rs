@@ -63,13 +63,13 @@ impl TryFrom<ClientConfig> for ClientInner {
                 panic!("WebRTC is not yet implemented")
             },
             ProtocolConfig::Ws { host, port } => {
-                NetworkConfig::new_ws_network_config(host, port, false, config.reverse_proxy)
+                NetworkConfig::new_ws_network_config(host, port, true, config.reverse_proxy)
             },
             ProtocolConfig::Wss { host, port, tls_credentials } => {
                 let key_file = tls_credentials.key_file.to_str()
                     .unwrap_or_else(|| panic!("Failed to convert path to PKCS#12 key file to string: {}", tls_credentials.key_file.display()))
                     .to_string();
-                NetworkConfig::new_wss_network_config(host, port, false, key_file, tls_credentials.passphrase)
+                NetworkConfig::new_wss_network_config(host, port, true, pkcs12_key_file, pkcs12_passphrase)
             }
         };
 
