@@ -446,7 +446,7 @@ impl Blockchain {
         let prev_info = if let Some(prev_info) = self.chain_store.get_chain_info(&block.parent_hash(), false, Some(&read_txn)) {
             prev_info
         } else {
-            warn!("Rejecting block - unknown predecessor");
+            warn!("Rejecting block - unknown predecessor (#{}, current #{})", block.header().block_number(), self.state.read().main_chain.head.block_number());
             #[cfg(feature = "metrics")]
                 self.metrics.note_orphan_block();
             return Err(PushError::Orphan);
