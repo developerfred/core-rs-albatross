@@ -40,110 +40,8 @@ use utils::throttled_queue::ThrottledQueue;
 
 use crate::consensus_agent::sync::{SyncEvent, SyncProtocol};
 use crate::ConsensusProtocol;
+use crate::inventory::InventoryManager;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum InventoryManagerTimer {
-    Request(InvVector)
-}
-
-type VectorsToRequest<P> = HashMap<InvVector, (Weak<InventoryAgent<P>>, PtrWeakHashSet<Weak<InventoryAgent<P>>>)>;
-
-pub struct InventoryManager<P: ConsensusProtocol + 'static> {
-    vectors_to_request: VectorsToRequest<P>,
-    self_weak: Weak<RwLock<InventoryManager<P>>>,
-    timers: Timers<InventoryManagerTimer>,
-}
-
-impl<P: ConsensusProtocol + 'static> InventoryManager<P> {
-    const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-
-    pub fn new() -> Arc<RwLock<Self>> {
-        let this = Arc::new(RwLock::new(InventoryManager {
-            vectors_to_request: HashMap::new(),
-            self_weak: Weak::new(),
-            timers: Timers::new(),
-        }));
-        this.write().self_weak = Arc::downgrade(&this);
-        this
-    }
-
-    fn ask_to_request_vector(&mut self, agent: &InventoryAgent<P>, vector: &InvVector) {
-        if self.vectors_to_request.contains_key(vector) {
-            let record = self.vectors_to_request.get_mut(&vector).unwrap();
-            let current_opt = record.0.upgrade();
-            if let Some(current) = current_opt {
-                if !current.peer.channel.closed() {
-                    let agent_arc = agent.self_weak.upgrade().unwrap();
-                    if !Arc::ptr_eq(&agent_arc, &current) {
-                        record.1.insert(agent_arc);
-                    }
-                    return;
-                }
-            }
-
-            record.0 = agent.self_weak.clone();
-            self.request_vector(agent, vector);
-        } else {
-            let record = (agent.self_weak.clone(), PtrWeakHashSet::new());
-            self.vectors_to_request.insert(vector.clone(), record);
-            self.request_vector(agent, vector);
-        }
-    }
-
-    fn request_vector(&mut self, agent: &InventoryAgent<P>, vector: &InvVector) {
-        agent.queue_vector(vector.clone());
-
-        let weak = self.self_weak.clone();
-        let agent1 = agent.self_weak.clone();
-        let vector1 = vector.clone();
-        self.timers.set_delay(InventoryManagerTimer::Request(vector.clone()), move || {
-            let this = upgrade_weak!(weak);
-            this.write().note_vector_not_received(&agent1, &vector1);
-        }, Self::REQUEST_TIMEOUT);
-    }
-
-    fn note_vector_received(&mut self, vector: &InvVector) {
-        self.timers.clear_delay(&InventoryManagerTimer::Request(vector.clone()));
-        self.vectors_to_request.remove(vector);
-    }
-
-    fn note_vector_not_received(&mut self, agent_weak: &Weak<InventoryAgent<P>>, vector: &InvVector) {
-        self.timers.clear_delay(&InventoryManagerTimer::Request(vector.clone()));
-        let record_opt = self.vectors_to_request.get_mut(vector);
-        if record_opt.is_none() {
-            return;
-        }
-
-        let record = record_opt.unwrap();
-        let current_opt = record.0.upgrade();
-        let agent_opt = agent_weak.upgrade();
-        if let Some(ref current) = current_opt {
-            if agent_opt.is_none() {
-                return;
-            }
-
-            let agent = agent_opt.unwrap();
-            if !Arc::ptr_eq(&agent, current) {
-                record.1.remove(&agent);
-                return;
-            }
-        }
-
-        let next_agent_opt = record.1.iter().next();
-        if next_agent_opt.is_none() {
-            self.vectors_to_request.remove(vector);
-            return;
-        }
-
-        let next_agent = next_agent_opt.unwrap().clone();
-        record.1.remove(&next_agent);
-        record.0 = Arc::downgrade(&next_agent);
-
-        debug!("Active agent {:p} didn't find {:?} {}, trying {:p} ({} agents left)", current_opt.unwrap(), vector.ty, vector.hash, next_agent, record.1.len());
-
-        self.request_vector(&next_agent, vector);
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum InventoryEvent<BE: BlockError> {
@@ -239,12 +137,12 @@ struct InventoryAgentState {
 pub struct InventoryAgent<P: ConsensusProtocol + 'static> {
     blockchain: Arc<P::Blockchain>,
     mempool: Arc<Mempool<P::Blockchain>>,
-    peer: Arc<Peer>,
+    pub(crate) peer: Arc<Peer>,
     inv_mgr: Arc<RwLock<InventoryManager<P>>>,
     sync_protocol: Arc<P::SyncProtocol>,
     state: RwLock<InventoryAgentState>,
     pub notifier: RwLock<Notifier<'static, InventoryEvent<<<P::Blockchain as AbstractBlockchain>::Block as Block>::Error>>>,
-    self_weak: MutableOnce<Weak<InventoryAgent<P>>>,
+    pub(crate) self_weak: MutableOnce<Weak<InventoryAgent<P>>>,
     timers: Timers<InventoryAgentTimer>,
     mutex: Mutex<()>,
 }
@@ -378,11 +276,11 @@ impl<P: ConsensusProtocol + 'static> InventoryAgent<P> {
             |this, subscription: Subscription| this.on_subscribe(subscription)));
 
         this.sync_protocol.register_listener(weak_passthru_listener(Arc::downgrade(this),
-        |this, event| {
-            match event {
-                SyncEvent::BlockProcessed(hash, result) => this.notifier.read().notify(InventoryEvent::BlockProcessed(hash, result)),
-            }
-        }));
+                                                                    |this, event| {
+                                                                        match event {
+                                                                            SyncEvent::BlockProcessed(hash, result) => this.notifier.read().notify(InventoryEvent::BlockProcessed(hash, result)),
+                                                                        }
+                                                                    }));
 
         let mut close_notifier = channel.close_notifier.write();
         close_notifier.register(weak_listener(
@@ -604,17 +502,17 @@ impl<P: ConsensusProtocol + 'static> InventoryAgent<P> {
         let state = self.state.read();
         // Query mempool for transactions
         let mut transactions = match &state.remote_subscription {
-           Subscription::Addresses(addresses) => self.mempool.get_transactions_by_addresses(addresses.clone(), Self::MEMPOOL_ENTRIES_MAX),
-           Subscription::MinFee(min_fee_per_byte) => {
+            Subscription::Addresses(addresses) => self.mempool.get_transactions_by_addresses(addresses.clone(), Self::MEMPOOL_ENTRIES_MAX),
+            Subscription::MinFee(min_fee_per_byte) => {
                 // NOTE: every integer up to (2^53 - 1) should have an exact representation as f64 (IEEE 754 64-bit double)
                 // This is guaranteed by the coin type.
                 let min_fee_per_byte: f64 = u64::from(*min_fee_per_byte) as f64;
                 self.mempool.get_transactions(Self::MEMPOOL_ENTRIES_MAX, min_fee_per_byte)
             },
-           Subscription::Any => {
+            Subscription::Any => {
                 self.mempool.get_transactions(Self::MEMPOOL_ENTRIES_MAX, 0f64)
-           },
-           Subscription::None => return,
+            },
+            Subscription::None => return,
         };
 
         // Send an InvVector for each transaction in the mempool.
@@ -658,7 +556,7 @@ impl<P: ConsensusProtocol + 'static> InventoryAgent<P> {
         self.timers.clear_all();
     }
 
-    fn queue_vector(&self, vector: InvVector) {
+    pub(crate) fn queue_vector(&self, vector: InvVector) {
         let mut state = self.state.write();
         match vector.ty {
             InvVectorType::Block => state.blocks_to_request.enqueue(vector),
