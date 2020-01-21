@@ -27,12 +27,10 @@ impl UnlockedWalletManager {
     }
 
     fn insert(&mut self, wallet: Unlocked<WalletAccount>) {
-        info!("Unlocking {:?}", &wallet.address);
         self.unlocked_wallets.insert(wallet.address.clone(), wallet);
     }
 
     pub fn get(&self, address: &Address) -> Option<&WalletAccount> {
-        info!("Accessing {:?}", address);
         self.unlocked_wallets.get(address).map(|unlocked| Unlocked::unlocked_data(unlocked))
     }
 
