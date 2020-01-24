@@ -54,21 +54,6 @@ pub trait Metrics: Send + Sync {
     fn metrics(&self, serializer: &mut MetricsSerializer<SerializationType>) -> Result<(), io::Error>;
 }
 
-#[derive(Debug)]
-pub enum Never {}
-
-impl std::error::Error for Never {
-    fn description(&self) -> &str {
-        match *self {}
-    }
-}
-
-impl std::fmt::Display for Never {
-    fn fmt(&self, _: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match *self {}
-    }
-}
-
 pub struct MetricsServer {
     metrics: Vec<Arc<dyn Metrics>>,
     common_attributes: CachedAttributes,
