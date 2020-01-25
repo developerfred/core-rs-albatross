@@ -51,7 +51,7 @@ impl WebSocketState {
     }
 }
 
-const MAX_CHUNK_SIZE: usize = 1024 * 16; // 16 kb
+const MAX_CHUNK_SIZE: usize = 1024 * 1024 * 100; // 100 mb
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 10; // 10 mb
 
 pub type NimiqMessageStream = MessageStream<WebSocketLayer>;
