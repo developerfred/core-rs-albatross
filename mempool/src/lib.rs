@@ -126,6 +126,7 @@ impl<B: AbstractBlockchain + 'static> Mempool<B> {
 
             // Intrinsic transaction verification.
             if transaction.verify_mut(self.blockchain.network_id()).is_err() {
+                trace!("Transaction with wrong network ID: {}", transaction.hash::<Blake2bHash>());
                 return ReturnCode::Invalid;
             }
 
@@ -151,11 +152,13 @@ impl<B: AbstractBlockchain + 'static> Mempool<B> {
             // Check if transaction is valid at the next block height.
             let block_height = self.blockchain.head_height() + 1;
             if !transaction.is_valid_at(block_height) {
+                trace!("Transaction outside validity window: {}", transaction.hash::<Blake2bHash>());
                 return ReturnCode::Invalid;
             }
 
             // Check if transaction has already been mined.
             if self.blockchain.contains_tx_in_validity_window(&hash) {
+                trace!("Transaction duplicate inside validity window: {}", transaction.hash::<Blake2bHash>());
                 return ReturnCode::Invalid;
             }
 
@@ -165,19 +168,26 @@ impl<B: AbstractBlockchain + 'static> Mempool<B> {
             let is_contract_creation = transaction.flags.contains(TransactionFlags::CONTRACT_CREATION);
             let is_type_change = recipient_account.account_type() != transaction.recipient_type;
             if is_contract_creation != is_type_change {
+                trace!("Transaction type must change exactly if contract created: {}", transaction.hash::<Blake2bHash>());
                 return ReturnCode::Invalid;
             }
 
             // Test incoming transaction.
             match recipient_account.check_incoming_transaction(&transaction, block_height) {
-                Err(_) => return ReturnCode::Invalid,
+                Err(_) => {
+                    trace!("Transaction is not valid for recipient: {}", transaction.hash::<Blake2bHash>());
+                    return ReturnCode::Invalid
+                },
                 Ok(_) => {
                     // Check recipient account against filter rules.
                     // FIXME This boldly assumes that the account balance after the incoming transaction is old_balance + transaction.value.
                     let old_balance = recipient_account.balance();
                     let new_balance = match old_balance.checked_add(transaction.value) {
                         Some(balance) => balance,
-                        None => return ReturnCode::Invalid
+                        None => {
+                            trace!("Transaction causes balance overflow: {}", transaction.hash::<Blake2bHash>());
+                            return ReturnCode::Invalid
+                        }
                     };
                     if !state.filter.accepts_recipient_balance(&transaction, old_balance, new_balance) {
                         self.state.write().filter.blacklist(hash);
@@ -190,6 +200,7 @@ impl<B: AbstractBlockchain + 'static> Mempool<B> {
             // TODO Eliminate copy
             let mut sender_account = self.blockchain.get_account(&transaction.sender);
             if sender_account.account_type() != transaction.sender_type {
+                trace!("Transaction for invalid sender type: {}", transaction.hash::<Blake2bHash>());
                 return ReturnCode::Invalid;
             }
 
@@ -215,6 +226,7 @@ impl<B: AbstractBlockchain + 'static> Mempool<B> {
                 }
                 // Reject the transaction, if after the intrinsic check, the balance went too low
                 if sender_account.commit_outgoing_transaction(tx, block_height).is_err() {
+                    trace!("Failed to commit transaction on sender: {}", tx.hash::<Blake2bHash>());
                     return ReturnCode::Invalid
                 }
                 tx_count += 1;
@@ -229,6 +241,7 @@ impl<B: AbstractBlockchain + 'static> Mempool<B> {
             // Now, check the new transaction.
             let old_sender_balance = sender_account.balance();
             if sender_account.commit_outgoing_transaction(&transaction, block_height).is_err() {
+                trace!("Failed to commit transaction on sender: {}", transaction.hash::<Blake2bHash>());
                 return ReturnCode::Invalid // XXX More specific return code here?
             };
 
