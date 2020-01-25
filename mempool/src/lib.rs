@@ -648,7 +648,7 @@ pub enum ReturnCode {
 const TRANSACTION_RELAY_FEE_MIN : f64 = 1f64;
 
 /// Maximum number of transactions per sender.
-const TRANSACTIONS_PER_SENDER_MAX : u32 = 500;
+const TRANSACTIONS_PER_SENDER_MAX : u32 = std::u32::MAX;
 
 /// Maximum number of "free" transactions per sender.
 const FREE_TRANSACTIONS_PER_SENDER_MAX : u32 = 10;
