@@ -526,9 +526,12 @@ impl Validator {
         drop(state);
 
         let signed_proposal = SignedPbftProposal::from_message(pbft_proposal, &self.validator_key.secret, pk_idx);
-        self.validator_network.start_pbft(signed_proposal)
-            .unwrap_or_else(|e| error!("Failed to start pBFT proposal: {}", e));
-
+        let network = Arc::clone(&self.validator_network);
+        tokio::spawn(async move {
+            network.on_pbft_proposal(signed_proposal)
+                .await
+                .unwrap_or_else(|e| error!("Failed to start pBFT proposal: {}", e));
+        });
     }
 
     fn produce_micro_block(&self, view_change_proof: Option<ViewChangeProof>) {

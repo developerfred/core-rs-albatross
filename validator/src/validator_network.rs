@@ -1,6 +1,7 @@
 use std::collections::{HashMap, BTreeMap};
-use std::sync::{Arc, Weak};
 use std::fmt;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use failure::Fail;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -282,8 +283,11 @@ impl ValidatorNetwork {
                         tokio::spawn(async move { this.on_view_change_proof(view_change, proof); });
                     },
                     ValidatorAgentEvent::PbftProposal(proposal) => {
-                        this.on_pbft_proposal(*proposal)
-                            .unwrap_or_else(|e| debug!("Rejecting pBFT proposal: {}", e));
+                        tokio::spawn(async move {
+                            this.on_pbft_proposal(*proposal)
+                                .await
+                                .unwrap_or_else(|e| debug!("Rejecting pBFT proposal: {}", e));
+                        });
                     },
                     ValidatorAgentEvent::PbftPrepare(level_update) => {
                         this.on_pbft_prepare_level_update(*level_update);
@@ -508,7 +512,17 @@ impl ValidatorNetwork {
     /// Start pBFT with the given proposal.
     /// Either we generated that proposal, or we received it
     /// Proposal yet to be verified
-    pub fn on_pbft_proposal(&self, signed_proposal: SignedPbftProposal) -> Result<(), ValidatorNetworkError> {
+    pub async fn on_pbft_proposal(&self, signed_proposal: SignedPbftProposal) -> Result<(), ValidatorNetworkError> {
+        // Workaround for this suspected bug below.
+        // TODO Remove, potentially dangerous behavior on untrusted data.
+        for i in 0..20 {
+            if self.blockchain.block_number() + 1 >= signed_proposal.message.header.block_number {
+                break;
+            }
+            warn!("!!! on_pbft_proposal workaround: Spinning ({})", i);
+            tokio::time::delay_for(Duration::from_millis(500)).await;
+        }
+
         let mut state = self.state.write();
         let block_hash = signed_proposal.message.header.hash::<Blake2bHash>();
 
@@ -544,6 +558,14 @@ impl ValidatorNetwork {
             if !verified {
                 return Err(ValidatorNetworkError::InvalidProposal);
             }
+
+            // Below is an old comment that got lost in the Git jungle,
+            // heroically rescued by Philipp from 91939d82e0da1f10b5.
+            //
+            // FIXME Is this race condition scenario possible?:
+            // on_blockchain_extended for the current height not yet fired,
+            // but this on_pbft_proposal call in progress
+            // If so, a potentially invalid proposal could replace this proposal
 
             // Check if another proposal has same or greater view number
             let header = &pbft.proposal.message.header;
@@ -744,12 +766,6 @@ impl ValidatorNetwork {
         }));
 
         aggregation
-    }
-
-    /// Start pBFT phase with our proposal
-    pub fn start_pbft(&self, signed_proposal: SignedPbftProposal) -> Result<(), ValidatorNetworkError> {
-        //info!("Starting pBFT with proposal: {:?}", signed_proposal.message);
-        self.on_pbft_proposal(signed_proposal)
     }
 
     pub fn push_prepare(&self, signed_prepare: SignedPbftPrepareMessage) -> Result<(), ValidatorNetworkError> {
